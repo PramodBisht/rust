@@ -1039,13 +1039,14 @@ struct Context<'a> {
 }
 
 macro_rules! gate_feature_fn {
-    ($cx: expr, $has_feature: expr, $span: expr, $name: expr, $explain: expr, $level: expr) => {{
+    ($cx: expr, $has_feature: expr, $span: expr, $name: expr, $explain: expr, $level: expr, $hint: hint) => {{
         let (cx, has_feature, span,
-             name, explain, level) = ($cx, $has_feature, $span, $name, $explain, $level);
+             name, explain, level, hint) = ($cx, $has_feature, $span, $name, $explain, $level, $hint);
         let has_feature: bool = has_feature(&$cx.features);
         debug!("gate_feature(feature = {:?}, span = {:?}); has? {}", name, span, has_feature);
         if !has_feature && !span.allows_unstable() {
-            leveled_feature_err(cx.parse_sess, name, span, GateIssue::Language, explain, level)
+            //
+            leveled_feature_err(cx.parse_sess, name, span, GateIssue::Language, explain, level, hint)
                 .emit();
         }
     }}
@@ -1054,11 +1055,15 @@ macro_rules! gate_feature_fn {
 macro_rules! gate_feature {
     ($cx: expr, $feature: ident, $span: expr, $explain: expr) => {
         gate_feature_fn!($cx, |x:&Features| x.$feature, $span,
-                         stringify!($feature), $explain, GateStrength::Hard)
+                         stringify!($feature), $explain, GateStrength::Hard, $hint)
+    };
+    ($cx: expr, $feature: ident, $span: expr, $explain: expr, $hint: hint) => {
+        gate_feature_fn!($cx, |x:&Features| x.$feature, $span,
+                         stringify!($feature), $explain, GateStrength::Hard, $hint)
     };
     ($cx: expr, $feature: ident, $span: expr, $explain: expr, $level: expr) => {
         gate_feature_fn!($cx, |x:&Features| x.$feature, $span,
-                         stringify!($feature), $explain, $level)
+                         stringify!($feature), $explain, $level, $hint)
     };
 }
 
@@ -1162,11 +1167,11 @@ pub fn emit_feature_err(sess: &ParseSess, feature: &str, span: Span, issue: Gate
 
 pub fn feature_err<'a>(sess: &'a ParseSess, feature: &str, span: Span, issue: GateIssue,
                        explain: &str) -> DiagnosticBuilder<'a> {
-    leveled_feature_err(sess, feature, span, issue, explain, GateStrength::Hard)
+    leveled_feature_err(sess, feature, span, issue, explain, GateStrength::Hard, "")
 }
 
 fn leveled_feature_err<'a>(sess: &'a ParseSess, feature: &str, span: Span, issue: GateIssue,
-                           explain: &str, level: GateStrength) -> DiagnosticBuilder<'a> {
+                           explain: &str, level: GateStrength, hint: str) -> DiagnosticBuilder<'a> {
     let diag = &sess.span_diagnostic;
 
     let issue = match issue {
@@ -1182,6 +1187,7 @@ fn leveled_feature_err<'a>(sess: &'a ParseSess, feature: &str, span: Span, issue
 
     let mut err = match level {
         GateStrength::Hard => {
+            // here we are
             diag.struct_span_err_with_code(span, &explanation, stringify_error_code!(E0658))
         }
         GateStrength::Soft => diag.struct_span_warn(span, &explanation),
@@ -1261,6 +1267,12 @@ macro_rules! gate_feature_post {
         let (cx, span) = ($cx, $span);
         if !span.allows_unstable() {
             gate_feature!(cx.context, $feature, span, $explain)
+        }
+    }};
+    ($cx: expr, $feature: ident, $span: expr, $explain: expr, $hint: hint) => {{
+        let (cx, span) = ($cx, $span);
+        if !span.allows_unstable() {
+            gate_feature!(cx.context, $feature, span, $explain, $hint)
         }
     }};
     ($cx: expr, $feature: ident, $span: expr, $explain: expr, $level: expr) => {{
@@ -1419,7 +1431,7 @@ impl<'a> PostExpansionVisitor<'a> {
                 if !has_feature && !span.allows_unstable() {
                     leveled_feature_err(
                         cx.parse_sess, name, span, GateIssue::Language,
-                        "mod statements in non-mod.rs files are unstable", level
+                        "mod statements in non-mod.rs files are unstable", level, ""
                     )
                     .help(&format!("on stable builds, rename this file to {}{}mod.rs",
                                    ident, path::MAIN_SEPARATOR))
@@ -1652,7 +1664,8 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
                                   "inclusive range syntax is experimental");
             }
             ast::ExprKind::InPlace(..) => {
-                gate_feature_post!(&self, placement_in_syntax, e.span, EXPLAIN_PLACEMENT_IN);
+                hint = format!("HINT: if you meant to compare x with 1 you should add a space between < and -");
+                gate_feature_post!(&self, placement_in_syntax, e.span, EXPLAIN_PLACEMENT_IN, hint);
             }
             ast::ExprKind::Yield(..) => {
                 gate_feature_post!(&self, generators,
