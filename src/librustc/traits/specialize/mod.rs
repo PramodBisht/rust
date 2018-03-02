@@ -8,14 +8,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Logic and data structures related to impl specialization, explained in
-// greater detail below.
-//
-// At the moment, this implementation support only the simple "chain" rule:
-// If any two impls overlap, one must be a strict subset of the other.
-//
-// See traits/README.md for a bit more detail on how specialization
-// fits together with the rest of the trait machinery.
+//! Logic and data structures related to impl specialization, explained in
+//! greater detail below.
+//!
+//! At the moment, this implementation support only the simple "chain" rule:
+//! If any two impls overlap, one must be a strict subset of the other.
+//!
+//! See the [rustc guide] for a bit more detail on how specialization
+//! fits together with the rest of the trait machinery.
+//!
+//! [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/trait-specialization.html
 
 use super::{SelectionContext, FulfillmentContext};
 use super::util::impl_trait_ref_and_oblig;
@@ -219,7 +221,7 @@ fn fulfill_implication<'a, 'gcx, 'tcx>(infcx: &InferCtxt<'a, 'gcx, 'tcx>,
                                        target_impl: DefId)
                                        -> Result<&'tcx Substs<'tcx>, ()> {
     let selcx = &mut SelectionContext::new(&infcx);
-    let target_substs = infcx.fresh_substs_for_item(DUMMY_SP, target_impl);
+    let target_substs = infcx.fresh_substs_for_item(param_env.universe, DUMMY_SP, target_impl);
     let (target_trait_ref, mut obligations) = impl_trait_ref_and_oblig(selcx,
                                                                        param_env,
                                                                        target_impl,

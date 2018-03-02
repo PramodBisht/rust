@@ -16,6 +16,7 @@ use ich::Fingerprint;
 
 use ich;
 use lint;
+use lint::builtin::BuiltinLintDiagnostics;
 use middle::allocator::AllocatorKind;
 use middle::dependency_format;
 use session::search_paths::PathKind;
@@ -341,7 +342,18 @@ impl Session {
                                            sp: S,
                                            msg: &str) {
         match *self.buffered_lints.borrow_mut() {
-            Some(ref mut buffer) => buffer.add_lint(lint, id, sp.into(), msg),
+            Some(ref mut buffer) => buffer.add_lint(lint, id, sp.into(),
+                                                    msg, BuiltinLintDiagnostics::Normal),
+            None => bug!("can't buffer lints after HIR lowering"),
+        }
+    }
+
+    pub fn buffer_lint_with_diagnostic<S: Into<MultiSpan>>(&self,
+        lint: &'static lint::Lint, id: ast::NodeId, sp: S,
+        msg: &str, diagnostic: BuiltinLintDiagnostics) {
+        match *self.buffered_lints.borrow_mut() {
+            Some(ref mut buffer) => buffer.add_lint(lint, id, sp.into(),
+                                                    msg, diagnostic),
             None => bug!("can't buffer lints after HIR lowering"),
         }
     }
@@ -869,6 +881,10 @@ impl Session {
     pub fn rust_2018(&self) -> bool {
         self.opts.debugging_opts.epoch >= Epoch::Epoch2018
     }
+
+    pub fn epoch(&self) -> Epoch {
+        self.opts.debugging_opts.epoch
+    }
 }
 
 pub fn build_session(sopts: config::Options,
@@ -909,21 +925,24 @@ pub fn build_session_with_codemap(sopts: config::Options,
 
     let emitter: Box<Emitter> = match (sopts.error_format, emitter_dest) {
         (config::ErrorOutputType::HumanReadable(color_config), None) => {
-            Box::new(EmitterWriter::stderr(color_config,
-                                           Some(codemap.clone()),
-                                           false,
-                                           sopts.debugging_opts.teach))
+            Box::new(EmitterWriter::stderr(color_config, Some(codemap.clone()),
+                     false, sopts.debugging_opts.teach)
+                     .ui_testing(sopts.debugging_opts.ui_testing))
         }
         (config::ErrorOutputType::HumanReadable(_), Some(dst)) => {
-            Box::new(EmitterWriter::new(dst, Some(codemap.clone()), false, false))
+            Box::new(EmitterWriter::new(dst, Some(codemap.clone()),
+                     false, false)
+                     .ui_testing(sopts.debugging_opts.ui_testing))
         }
         (config::ErrorOutputType::Json(pretty), None) => {
             Box::new(JsonEmitter::stderr(Some(registry), codemap.clone(),
-                     pretty, sopts.debugging_opts.approximate_suggestions))
+                     pretty, sopts.debugging_opts.approximate_suggestions)
+                     .ui_testing(sopts.debugging_opts.ui_testing))
         }
         (config::ErrorOutputType::Json(pretty), Some(dst)) => {
             Box::new(JsonEmitter::new(dst, Some(registry), codemap.clone(),
-                     pretty, sopts.debugging_opts.approximate_suggestions))
+                     pretty, sopts.debugging_opts.approximate_suggestions)
+                     .ui_testing(sopts.debugging_opts.ui_testing))
         }
         (config::ErrorOutputType::Short(color_config), None) => {
             Box::new(EmitterWriter::stderr(color_config, Some(codemap.clone()), true, false))

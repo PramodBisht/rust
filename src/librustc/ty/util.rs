@@ -19,7 +19,8 @@ use middle::const_val::ConstVal;
 use traits::{self, Reveal};
 use ty::{self, Ty, TyCtxt, TypeFoldable};
 use ty::fold::TypeVisitor;
-use ty::subst::{Subst, Kind};
+use ty::maps::TyCtxtAt;
+use ty::subst::{Subst, UnpackedKind};
 use ty::TypeVariants::*;
 use util::common::ErrorReported;
 use middle::lang_items;
@@ -153,14 +154,15 @@ impl<'tcx> ty::ParamEnv<'tcx> {
     /// Construct a trait environment suitable for contexts where
     /// there are no where clauses in scope.
     pub fn empty(reveal: Reveal) -> Self {
-        Self::new(ty::Slice::empty(), reveal)
+        Self::new(ty::Slice::empty(), reveal, ty::UniverseIndex::ROOT)
     }
 
     /// Construct a trait environment with the given set of predicates.
     pub fn new(caller_bounds: &'tcx ty::Slice<ty::Predicate<'tcx>>,
-               reveal: Reveal)
+               reveal: Reveal,
+               universe: ty::UniverseIndex)
                -> Self {
-        ty::ParamEnv { caller_bounds, reveal }
+        ty::ParamEnv { caller_bounds, reveal, universe }
     }
 
     /// Returns a new parameter environment with the same clauses, but
@@ -509,16 +511,20 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
 
         let result = item_substs.iter().zip(impl_substs.iter())
             .filter(|&(_, &k)| {
-                if let Some(&ty::RegionKind::ReEarlyBound(ref ebr)) = k.as_region() {
-                    !impl_generics.region_param(ebr, self).pure_wrt_drop
-                } else if let Some(&ty::TyS {
-                    sty: ty::TypeVariants::TyParam(ref pt), ..
-                }) = k.as_type() {
-                    !impl_generics.type_param(pt, self).pure_wrt_drop
-                } else {
-                    // not a type or region param - this should be reported
-                    // as an error.
-                    false
+                match k.unpack() {
+                    UnpackedKind::Lifetime(&ty::RegionKind::ReEarlyBound(ref ebr)) => {
+                        !impl_generics.region_param(ebr, self).pure_wrt_drop
+                    }
+                    UnpackedKind::Type(&ty::TyS {
+                        sty: ty::TypeVariants::TyParam(ref pt), ..
+                    }) => {
+                        !impl_generics.type_param(pt, self).pure_wrt_drop
+                    }
+                    UnpackedKind::Lifetime(_) | UnpackedKind::Type(_) => {
+                        // not a type or region param - this should be reported
+                        // as an error.
+                        false
+                    }
                 }
             }).map(|(&item_param, _)| item_param).collect();
         debug!("destructor_constraint({:?}) = {:?}", def.did, result);
@@ -596,7 +602,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             // Objects must be alive in order for their destructor
             // to be called.
             ty::TyDynamic(..) => Ok(ty::DtorckConstraint {
-                outlives: vec![Kind::from(ty)],
+                outlives: vec![ty.into()],
                 dtorck_types: vec![],
             }),
 
@@ -859,11 +865,10 @@ impl<'a, 'tcx> ty::TyS<'tcx> {
     }
 
     pub fn is_sized(&'tcx self,
-                    tcx: TyCtxt<'a, 'tcx, 'tcx>,
-                    param_env: ty::ParamEnv<'tcx>,
-                    span: Span)-> bool
+                    tcx_at: TyCtxtAt<'a, 'tcx, 'tcx>,
+                    param_env: ty::ParamEnv<'tcx>)-> bool
     {
-        tcx.at(span).is_sized_raw(param_env.and(self))
+        tcx_at.is_sized_raw(param_env.and(self))
     }
 
     pub fn is_freeze(&'tcx self,

@@ -516,8 +516,7 @@ fn rustc_cargo_env(build: &Build, cargo: &mut Command) {
          .env("CFG_VERSION", build.rust_version())
          .env("CFG_PREFIX", build.config.prefix.clone().unwrap_or_default());
 
-    let libdir_relative =
-        build.config.libdir.clone().unwrap_or(PathBuf::from("lib"));
+    let libdir_relative = build.config.libdir_relative().unwrap_or(Path::new("lib"));
     cargo.env("CFG_LIBDIR_RELATIVE", libdir_relative);
 
     // If we're not building a compiler with debugging information then remove
@@ -1008,6 +1007,10 @@ pub fn run_cargo(build: &Build, cargo: &mut Command, stamp: &Path, is_check: boo
             continue
         };
         if json["reason"].as_str() != Some("compiler-artifact") {
+            if build.config.rustc_error_format.as_ref().map_or(false, |e| e == "json") {
+                // most likely not a cargo message, so let's send it out as well
+                println!("{}", line);
+            }
             continue
         }
         for filename in json["filenames"].as_array().unwrap() {

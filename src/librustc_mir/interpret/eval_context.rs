@@ -7,7 +7,7 @@ use rustc::middle::const_val::ConstVal;
 use rustc::mir;
 use rustc::traits::Reveal;
 use rustc::ty::layout::{self, Size, Align, HasDataLayout, LayoutOf, TyLayout};
-use rustc::ty::subst::{Subst, Substs, Kind};
+use rustc::ty::subst::{Subst, Substs};
 use rustc::ty::{self, Ty, TyCtxt};
 use rustc_data_structures::indexed_vec::Idx;
 use syntax::codemap::{self, DUMMY_SP};
@@ -286,7 +286,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
     }
 
     pub(super) fn type_is_sized(&self, ty: Ty<'tcx>) -> bool {
-        ty.is_sized(self.tcx, self.param_env, DUMMY_SP)
+        ty.is_sized(self.tcx.at(DUMMY_SP), self.param_env)
     }
 
     pub fn load_mir(
@@ -1663,6 +1663,6 @@ pub fn resolve_drop_in_place<'a, 'tcx>(
     ty: Ty<'tcx>,
 ) -> ty::Instance<'tcx> {
     let def_id = tcx.require_lang_item(::rustc::middle::lang_items::DropInPlaceFnLangItem);
-    let substs = tcx.intern_substs(&[Kind::from(ty)]);
+    let substs = tcx.intern_substs(&[ty.into()]);
     ty::Instance::resolve(tcx, ty::ParamEnv::empty(Reveal::All), def_id, substs).unwrap()
 }

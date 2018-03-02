@@ -8,7 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Trait Resolution. See README.md for an overview of how this works.
+//! Trait Resolution. See [rustc guide] for more info on how this works.
+//!
+//! [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/trait-resolution.html
 
 pub use self::SelectionError::*;
 pub use self::FulfillmentErrorCode::*;
@@ -49,7 +51,7 @@ pub use self::util::SupertraitDefIds;
 pub use self::util::transitive_bounds;
 
 mod coherence;
-mod error_reporting;
+pub mod error_reporting;
 mod fulfill;
 mod project;
 mod object_safety;
@@ -73,19 +75,30 @@ pub enum IntercrateMode {
 /// either identifying an `impl` (e.g., `impl Eq for int`) that
 /// provides the required vtable, or else finding a bound that is in
 /// scope. The eventual result is usually a `Selection` (defined below).
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Obligation<'tcx, T> {
+    /// Why do we have to prove this thing?
     pub cause: ObligationCause<'tcx>,
+
+    /// In which environment should we prove this thing?
     pub param_env: ty::ParamEnv<'tcx>,
-    pub recursion_depth: usize,
+
+    /// What are we trying to prove?
     pub predicate: T,
+
+    /// If we started proving this as a result of trying to prove
+    /// something else, track the total depth to ensure termination.
+    /// If this goes over a certain threshold, we abort compilation --
+    /// in such cases, we can not say whether or not the predicate
+    /// holds for certain. Stupid halting problem. Such a drag.
+    pub recursion_depth: usize,
 }
 
 pub type PredicateObligation<'tcx> = Obligation<'tcx, ty::Predicate<'tcx>>;
 pub type TraitObligation<'tcx> = Obligation<'tcx, ty::PolyTraitPredicate<'tcx>>;
 
 /// Why did we incur this obligation? Used for error reporting.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ObligationCause<'tcx> {
     pub span: Span,
 
@@ -113,7 +126,7 @@ impl<'tcx> ObligationCause<'tcx> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ObligationCauseCode<'tcx> {
     /// Not well classified or should be obvious from span.
     MiscObligation,
@@ -215,7 +228,7 @@ pub enum ObligationCauseCode<'tcx> {
     BlockTailExpression(ast::NodeId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DerivedObligationCause<'tcx> {
     /// The trait reference of the parent obligation that led to the
     /// current obligation. Note that only trait obligations lead to
@@ -304,7 +317,7 @@ pub type SelectionResult<'tcx, T> = Result<Option<T>, SelectionError<'tcx>>;
 /// ### The type parameter `N`
 ///
 /// See explanation on `VtableImplData`.
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub enum Vtable<'tcx, N> {
     /// Vtable identifying a particular impl.
     VtableImpl(VtableImplData<'tcx, N>),
@@ -374,13 +387,13 @@ pub struct VtableClosureData<'tcx, N> {
     pub nested: Vec<N>
 }
 
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub struct VtableAutoImplData<N> {
     pub trait_def_id: DefId,
     pub nested: Vec<N>
 }
 
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub struct VtableBuiltinData<N> {
     pub nested: Vec<N>
 }
@@ -533,7 +546,8 @@ pub fn normalize_param_env_or_error<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
            predicates);
 
     let elaborated_env = ty::ParamEnv::new(tcx.intern_predicates(&predicates),
-                                           unnormalized_env.reveal);
+                                           unnormalized_env.reveal,
+                                           unnormalized_env.universe);
 
     tcx.infer_ctxt().enter(|infcx| {
         // FIXME. We should really... do something with these region
@@ -607,7 +621,9 @@ pub fn normalize_param_env_or_error<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
         debug!("normalize_param_env_or_error: resolved predicates={:?}",
                predicates);
 
-        ty::ParamEnv::new(tcx.intern_predicates(&predicates), unnormalized_env.reveal)
+        ty::ParamEnv::new(tcx.intern_predicates(&predicates),
+                          unnormalized_env.reveal,
+                          unnormalized_env.universe)
     })
 }
 

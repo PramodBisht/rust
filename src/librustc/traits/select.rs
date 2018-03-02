@@ -8,7 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! See `README.md` for high-level documentation
+//! See [rustc guide] for more info on how this works.
+//!
+//! [rustc guide]: https://rust-lang-nursery.github.io/rustc-guide/trait-resolution.html#selection
 
 use self::SelectionCandidate::*;
 use self::EvaluationResult::*;
@@ -53,7 +55,7 @@ use std::rc::Rc;
 use syntax::abi::Abi;
 use hir;
 use lint;
-use util::nodemap::FxHashMap;
+use util::nodemap::{FxHashMap, FxHashSet};
 
 struct InferredObligationsSnapshotVecDelegate<'tcx> {
     phantom: PhantomData<&'tcx i32>,
@@ -494,7 +496,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     /// Wraps the inference context's in_snapshot s.t. snapshot handling is only from the selection
     /// context's self.
     fn in_snapshot<R, F>(&mut self, f: F) -> R
-        where F: FnOnce(&mut Self, &infer::CombinedSnapshot) -> R
+        where F: FnOnce(&mut Self, &infer::CombinedSnapshot<'cx, 'tcx>) -> R
     {
         // The irrefutable nature of the operation means we don't need to snapshot the
         // inferred_obligations vector.
@@ -504,7 +506,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     /// Wraps a probe s.t. obligations collected during it are ignored and old obligations are
     /// retained.
     fn probe<R, F>(&mut self, f: F) -> R
-        where F: FnOnce(&mut Self, &infer::CombinedSnapshot) -> R
+        where F: FnOnce(&mut Self, &infer::CombinedSnapshot<'cx, 'tcx>) -> R
     {
         let inferred_obligations_snapshot = self.inferred_obligations.start_snapshot();
         let result = self.infcx.probe(|snapshot| f(self, snapshot));
@@ -584,7 +586,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     let trait_ref = &mut trait_pred.trait_ref;
                     let unit_substs = trait_ref.substs;
                     let mut never_substs = Vec::with_capacity(unit_substs.len());
-                    never_substs.push(From::from(tcx.types.never));
+                    never_substs.push(tcx.types.never.into());
                     never_substs.extend(&unit_substs[1..]);
                     trait_ref.substs = tcx.intern_substs(&never_substs);
                 }
@@ -1045,8 +1047,10 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     //
     // The selection process begins by examining all in-scope impls,
     // caller obligations, and so forth and assembling a list of
-    // candidates. See `README.md` and the `Candidate` type for more
-    // details.
+    // candidates. See [rustc guide] for more details.
+    //
+    // [rustc guide]:
+    // https://rust-lang-nursery.github.io/rustc-guide/trait-resolution.html#candidate-assembly
 
     fn candidate_from_obligation<'o>(&mut self,
                                      stack: &TraitObligationStack<'o, 'tcx>)
@@ -1474,7 +1478,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     fn match_projection_obligation_against_definition_bounds(
         &mut self,
         obligation: &TraitObligation<'tcx>,
-        snapshot: &infer::CombinedSnapshot)
+        snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
         -> bool
     {
         let poly_trait_predicate =
@@ -1545,7 +1549,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                         trait_bound: ty::PolyTraitRef<'tcx>,
                         skol_trait_ref: ty::TraitRef<'tcx>,
                         skol_map: &infer::SkolemizationMap<'tcx>,
-                        snapshot: &infer::CombinedSnapshot)
+                        snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
                         -> bool
     {
         assert!(!skol_trait_ref.has_escaping_regions());
@@ -2333,7 +2337,10 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     //
     // Confirmation unifies the output type parameters of the trait
     // with the values found in the obligation, possibly yielding a
-    // type error.  See `README.md` for more details.
+    // type error.  See [rustc guide] for more details.
+    //
+    // [rustc guide]:
+    // https://rust-lang-nursery.github.io/rustc-guide/trait-resolution.html#confirmation
 
     fn confirm_candidate(&mut self,
                          obligation: &TraitObligation<'tcx>,
@@ -2580,7 +2587,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                    recursion_depth: usize,
                    param_env: ty::ParamEnv<'tcx>,
                    skol_map: infer::SkolemizationMap<'tcx>,
-                   snapshot: &infer::CombinedSnapshot)
+                   snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
                    -> VtableImplData<'tcx, PredicateObligation<'tcx>>
     {
         debug!("vtable_impl(impl_def_id={:?}, substs={:?}, recursion_depth={}, skol_map={:?})",
@@ -2997,7 +3004,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 // unsized parameters is equal to the target.
                 let params = substs_a.iter().enumerate().map(|(i, &k)| {
                     if ty_params.contains(i) {
-                        Kind::from(substs_b.type_at(i))
+                        substs_b.type_at(i).into()
                     } else {
                         k
                     }
@@ -3069,7 +3076,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     fn rematch_impl(&mut self,
                     impl_def_id: DefId,
                     obligation: &TraitObligation<'tcx>,
-                    snapshot: &infer::CombinedSnapshot)
+                    snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
                     -> (Normalized<'tcx, &'tcx Substs<'tcx>>,
                         infer::SkolemizationMap<'tcx>)
     {
@@ -3086,7 +3093,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
     fn match_impl(&mut self,
                   impl_def_id: DefId,
                   obligation: &TraitObligation<'tcx>,
-                  snapshot: &infer::CombinedSnapshot)
+                  snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
                   -> Result<(Normalized<'tcx, &'tcx Substs<'tcx>>,
                              infer::SkolemizationMap<'tcx>), ()>
     {
@@ -3104,7 +3111,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             snapshot);
         let skol_obligation_trait_ref = skol_obligation.trait_ref;
 
-        let impl_substs = self.infcx.fresh_substs_for_item(obligation.cause.span,
+        let impl_substs = self.infcx.fresh_substs_for_item(obligation.param_env.universe,
+                                                           obligation.cause.span,
                                                            impl_def_id);
 
         let impl_trait_ref = impl_trait_ref.subst(self.tcx(),
@@ -3281,7 +3289,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                                  def_id: DefId, // of impl or trait
                                  substs: &Substs<'tcx>, // for impl or trait
                                  skol_map: infer::SkolemizationMap<'tcx>,
-                                 snapshot: &infer::CombinedSnapshot)
+                                 snapshot: &infer::CombinedSnapshot<'cx, 'tcx>)
                                  -> Vec<PredicateObligation<'tcx>>
     {
         debug!("impl_or_trait_obligations(def_id={:?})", def_id);
@@ -3303,7 +3311,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         // that order.
         let predicates = tcx.predicates_of(def_id);
         assert_eq!(predicates.parent, None);
-        let predicates = predicates.predicates.iter().flat_map(|predicate| {
+        let mut predicates: Vec<_> = predicates.predicates.iter().flat_map(|predicate| {
             let predicate = normalize_with_depth(self, param_env, cause.clone(), recursion_depth,
                                                  &predicate.subst(tcx, substs));
             predicate.obligations.into_iter().chain(
@@ -3314,6 +3322,13 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     predicate: predicate.value
                 }))
         }).collect();
+        // We are performing deduplication here to avoid exponential blowups
+        // (#38528) from happening, but the real cause of the duplication is
+        // unknown. What we know is that the deduplication avoids exponential
+        // amount of predicates being propogated when processing deeply nested
+        // types.
+        let mut seen = FxHashSet();
+        predicates.retain(|i| seen.insert(i.clone()));
         self.infcx().plug_leaks(skol_map, snapshot, predicates)
     }
 }

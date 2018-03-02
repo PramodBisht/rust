@@ -368,8 +368,7 @@ fn collect_items_rec<'a, 'tcx: 'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     let recursion_depth_reset;
 
     match starting_point {
-        MonoItem::Static(node_id) => {
-            let def_id = tcx.hir.local_def_id(node_id);
+        MonoItem::Static(def_id) => {
             let instance = Instance::mono(tcx, def_id);
 
             // Sanity check whether this ended up being collected accidentally
@@ -652,8 +651,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
         let tcx = self.tcx;
         let instance = Instance::mono(tcx, static_.def_id);
         if should_monomorphize_locally(tcx, &instance) {
-            let node_id = tcx.hir.as_local_node_id(static_.def_id).unwrap();
-            self.output.push(MonoItem::Static(node_id));
+            self.output.push(MonoItem::Static(static_.def_id));
         }
 
         self.super_static(static_, context, location);
@@ -798,7 +796,7 @@ fn find_vtable_types_for_unsizing<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     let ptr_vtable = |inner_source: Ty<'tcx>, inner_target: Ty<'tcx>| {
         let type_has_metadata = |ty: Ty<'tcx>| -> bool {
             use syntax_pos::DUMMY_SP;
-            if ty.is_sized(tcx, ty::ParamEnv::empty(traits::Reveal::All), DUMMY_SP) {
+            if ty.is_sized(tcx.at(DUMMY_SP), ty::ParamEnv::empty(traits::Reveal::All)) {
                 return false;
             }
             let tail = tcx.struct_tail(ty);
@@ -946,10 +944,10 @@ impl<'b, 'a, 'v> ItemLikeVisitor<'v> for RootCollector<'b, 'a, 'v> {
                 self.output.push(MonoItem::GlobalAsm(item.id));
             }
             hir::ItemStatic(..) => {
+                let def_id = self.tcx.hir.local_def_id(item.id);
                 debug!("RootCollector: ItemStatic({})",
-                       def_id_to_string(self.tcx,
-                                        self.tcx.hir.local_def_id(item.id)));
-                self.output.push(MonoItem::Static(item.id));
+                       def_id_to_string(self.tcx, def_id));
+                self.output.push(MonoItem::Static(def_id));
             }
             hir::ItemConst(..) => {
                 // const items only generate mono items if they are
