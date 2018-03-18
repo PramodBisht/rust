@@ -1,0 +1,24 @@
+error[E0585]: found a documentation comment that doesn't document anything
+  --> $DIR/issue-48636.rs:13:5
+   |
+LL |     /// The id of the parent core
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: doc comments must come before what they document, maybe a comment was intended with `//`?
+
+error: expected `,`, or `}`, found `/// The id of the parent core`
+  --> $DIR/issue-48636.rs:13:5
+   |
+LL |     /// The id of the parent core
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: struct fields should be separated by commas
+
+error[E0601]: `main` function not found in crate `issue_48636`
+  |
+  = note: consider adding a `main` function to `$DIR/issue-48636.rs`
+
+error: aborting due to 3 previous errors
+
+Some errors occurred: E0585, E0601.
+For more information about an error, try `rustc --explain E0585`.
